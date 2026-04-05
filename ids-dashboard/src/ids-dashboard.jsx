@@ -1,0 +1,514 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+// ── Palette & constants ────────────────────────────────────────────────────
+const C = {
+  bg: "#050810",
+  panel: "#080d1a",
+  border: "#0f1e3a",
+  accent: "#00f5d4",
+  warn: "#ffbe0b",
+  danger: "#ff006e",
+  safe: "#06d6a0",
+  muted: "#3a4d6b",
+  text: "#cdd9f0",
+  dim: "#4a5f80",
+};
+
+// ── Fake ML engine ─────────────────────────────────────────────────────────
+const PROTOCOLS = ["TCP", "UDP", "HTTP", "HTTPS", "DNS", "ICMP", "FTP", "SSH"];
+const ATTACK_TYPES = ["Port Scan", "DDoS", "Brute Force", "SQL Injection", "XSS", "MITM", "C2 Beacon", "Data Exfil"];
+const GEO = ["US", "CN", "RU", "DE", "BR", "IN", "KR", "FR", "NL", "NG"];
+
+function randomIP() {
+  return `${(Math.random() * 220 + 10) | 0}.${(Math.random() * 254) | 0}.${(Math.random() * 254) | 0}.${(Math.random() * 254) | 0}`;
+}
+
+function generatePacket(id) {
+  const anomalyScore = Math.random();
+  const isAnomaly = anomalyScore > 0.82;
+  const severity = anomalyScore > 0.96 ? "critical" : anomalyScore > 0.90 ? "high" : anomalyScore > 0.82 ? "medium" : "low";
+  return {
+    id,
+    ts: Date.now(),
+    src: randomIP(),
+    dst: randomIP(),
+    srcPort: (Math.random() * 65535) | 0,
+    dstPort: [80, 443, 22, 53, 21, 8080, 3306, 6379][(Math.random() * 8) | 0],
+    proto: PROTOCOLS[(Math.random() * PROTOCOLS.length) | 0],
+    bytes: (Math.random() * 65000 + 40) | 0,
+    score: +anomalyScore.toFixed(4),
+    anomaly: isAnomaly,
+    severity,
+    attackType: isAnomaly ? ATTACK_TYPES[(Math.random() * ATTACK_TYPES.length) | 0] : null,
+    geo: GEO[(Math.random() * GEO.length) | 0],
+    features: {
+      pktRate: +(Math.random() * 1000).toFixed(1),
+      byteEntropy: +(Math.random() * 8).toFixed(3),
+      ttlVar: +(Math.random() * 60).toFixed(1),
+      flagAnomaly: Math.random() > 0.7,
+    },
+  };
+}
+
+// ── Mini sparkline ─────────────────────────────────────────────────────────
+function Spark({ data, color = C.accent, h = 36 }) {
+  const w = 120;
+  if (!data.length) return null;
+  const max = Math.max(...data, 1);
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - (v / max) * h}`).join(" ");
+  return (
+    <svg width={w} height={h} style={{ display: "block" }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ── Gauge ring ─────────────────────────────────────────────────────────────
+function Gauge({ value, max = 1, label, color }) {
+  const r = 28, cx = 36, cy = 36;
+  const circ = 2 * Math.PI * r;
+  const pct = Math.min(value / max, 1);
+  const dash = pct * circ;
+  const col = pct > 0.85 ? C.danger : pct > 0.6 ? C.warn : color || C.accent;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+      <svg width={72} height={72}>
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={C.border} strokeWidth={6} />
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={col} strokeWidth={6}
+          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
+          transform={`rotate(-90 ${cx} ${cy})`}
+          style={{ transition: "stroke-dasharray 0.4s ease, stroke 0.4s ease" }} />
+        <text x={cx} y={cy + 5} textAnchor="middle" fill={col}
+          style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
+          {(pct * 100).toFixed(0)}%
+        </text>
+      </svg>
+      <span style={{ fontSize: 10, color: C.dim, fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>{label}</span>
+    </div>
+  );
+}
+
+// ── Score bar ──────────────────────────────────────────────────────────────
+function ScoreBar({ score }) {
+  const col = score > 0.96 ? C.danger : score > 0.90 ? "#ff6b35" : score > 0.82 ? C.warn : C.safe;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ width: 60, height: 4, background: C.border, borderRadius: 2, overflow: "hidden" }}>
+        <div style={{ width: `${score * 100}%`, height: "100%", background: col, transition: "width 0.3s", borderRadius: 2 }} />
+      </div>
+      <span style={{ fontSize: 10, color: col, fontFamily: "'Space Mono', monospace" }}>{score.toFixed(3)}</span>
+    </div>
+  );
+}
+
+// ── Severity badge ─────────────────────────────────────────────────────────
+function Badge({ sev }) {
+  const map = { critical: C.danger, high: "#ff6b35", medium: C.warn, low: C.safe };
+  const col = map[sev] || C.dim;
+  return (
+    <span style={{
+      fontSize: 9, padding: "2px 6px", borderRadius: 2,
+      border: `1px solid ${col}`, color: col,
+      fontFamily: "'Space Mono', monospace", letterSpacing: 1, textTransform: "uppercase"
+    }}>{sev}</span>
+  );
+}
+
+// ── Threat heatmap (protocol × hour grid) ─────────────────────────────────
+function HeatMap({ alerts }) {
+  const protos = ["TCP", "UDP", "HTTP", "DNS", "SSH"];
+  const hours = Array.from({ length: 12 }, (_, i) => i);
+  const grid = {};
+  protos.forEach(p => { grid[p] = {}; hours.forEach(h => { grid[p][h] = 0; }); });
+  alerts.forEach(a => {
+    const h = new Date(a.ts).getMinutes() % 12;
+    if (grid[a.proto]) grid[a.proto][h] = (grid[a.proto][h] || 0) + 1;
+  });
+  const maxV = Math.max(...protos.flatMap(p => hours.map(h => grid[p][h])), 1);
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 2, marginBottom: 4, paddingLeft: 36 }}>
+        {hours.map(h => (
+          <div key={h} style={{ width: 18, fontSize: 8, color: C.dim, textAlign: "center", fontFamily: "'Space Mono', monospace" }}>{h}</div>
+        ))}
+      </div>
+      {protos.map(p => (
+        <div key={p} style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 2 }}>
+          <div style={{ width: 34, fontSize: 9, color: C.dim, fontFamily: "'Space Mono', monospace" }}>{p}</div>
+          {hours.map(h => {
+            const v = grid[p][h];
+            const intensity = v / maxV;
+            const col = intensity > 0.7 ? C.danger : intensity > 0.4 ? C.warn : intensity > 0 ? C.accent : C.border;
+            return (
+              <div key={h} title={`${p} h${h}: ${v}`} style={{
+                width: 18, height: 14, borderRadius: 2,
+                background: intensity > 0 ? col : C.border,
+                opacity: intensity > 0 ? 0.3 + intensity * 0.7 : 0.3,
+                transition: "background 0.4s",
+              }} />
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Main dashboard ─────────────────────────────────────────────────────────
+export default function IDS() {
+  const [running, setRunning] = useState(true);
+  const [packets, setPackets] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [stats, setStats] = useState({ total: 0, anomalies: 0, critical: 0, blocked: 0 });
+  const [throughput, setThroughput] = useState([]);
+  const [anomalyRate, setAnomalyRate] = useState([]);
+  const [selectedPkt, setSelectedPkt] = useState(null);
+  const [filter, setFilter] = useState("all"); // all | anomaly
+  const [modelInfo] = useState({ name: "IsoForest + LSTM Autoencoder", threshold: 0.82, version: "v2.4.1" });
+  const counterRef = useRef(0);
+  const tbodyRef = useRef(null);
+
+  const tick = useCallback(() => {
+    const batch = Array.from({ length: (Math.random() * 5 + 2) | 0 }, () => generatePacket(++counterRef.current));
+    setPackets(prev => [...batch, ...prev].slice(0, 200));
+    const newAlerts = batch.filter(p => p.anomaly);
+    if (newAlerts.length) setAlerts(prev => [...newAlerts, ...prev].slice(0, 80));
+    setStats(prev => ({
+      total: prev.total + batch.length,
+      anomalies: prev.anomalies + newAlerts.length,
+      critical: prev.critical + batch.filter(p => p.severity === "critical").length,
+      blocked: prev.blocked + batch.filter(p => p.severity === "critical" || p.severity === "high").length,
+    }));
+    setThroughput(prev => [...prev, batch.reduce((s, p) => s + p.bytes, 0)].slice(-40));
+    setAnomalyRate(prev => [...prev, newAlerts.length / batch.length].slice(-40));
+  }, []);
+
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(tick, 600);
+    return () => clearInterval(id);
+  }, [running, tick]);
+
+  const displayed = filter === "anomaly" ? packets.filter(p => p.anomaly) : packets;
+
+  const globalScore = stats.total ? +(stats.anomalies / stats.total).toFixed(4) : 0;
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: C.bg, color: C.text,
+      fontFamily: "'Space Mono', monospace",
+      padding: "0",
+      backgroundImage: `radial-gradient(ellipse at 20% 10%, rgba(0,245,212,0.04) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 80%, rgba(255,0,110,0.04) 0%, transparent 60%)`,
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Rajdhani:wght@600;700&display=swap');
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: ${C.bg}; }
+        ::-webkit-scrollbar-thumb { background: ${C.muted}; border-radius: 2px; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        .row-anomaly { animation: flashRow 0.5s ease; }
+        @keyframes flashRow { 0% { background: rgba(255,0,110,0.15); } 100% { background: transparent; } }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+        .blink { animation: blink 1s step-end infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+      `}</style>
+
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "12px 24px", borderBottom: `1px solid ${C.border}`,
+        background: "rgba(8,13,26,0.95)", backdropFilter: "blur(8px)",
+        position: "sticky", top: 0, zIndex: 100,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ position: "relative" }}>
+            <svg width={28} height={28} viewBox="0 0 28 28">
+              <polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke={C.accent} strokeWidth={1.5} />
+              <polygon points="14,7 21,11 21,17 14,21 7,17 7,11" fill="none" stroke={C.accent} strokeWidth={1} opacity={0.5} />
+              <circle cx={14} cy={14} r={3} fill={C.accent} className="pulse" />
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: 3, color: C.accent }}>
+              SENTINEL·IDS
+            </div>
+            <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2 }}>ML-POWERED INTRUSION DETECTION</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          <div style={{ fontSize: 10, color: C.dim }}>
+            MODEL <span style={{ color: C.text }}>{modelInfo.name}</span>
+          </div>
+          <div style={{ fontSize: 10, color: C.dim }}>
+            THRESHOLD <span style={{ color: C.warn }}>{modelInfo.threshold}</span>
+          </div>
+          <div style={{ fontSize: 10, color: C.dim }}>
+            {modelInfo.version}
+          </div>
+          <button onClick={() => setRunning(r => !r)} style={{
+            padding: "6px 16px", borderRadius: 2,
+            border: `1px solid ${running ? C.danger : C.safe}`,
+            background: running ? "rgba(255,0,110,0.1)" : "rgba(6,214,160,0.1)",
+            color: running ? C.danger : C.safe,
+            cursor: "pointer", fontSize: 10, letterSpacing: 2,
+            fontFamily: "'Space Mono', monospace",
+          }}>
+            {running ? "■ STOP" : "▶ START"}
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div className={running ? "pulse" : ""} style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: running ? C.safe : C.danger,
+            }} />
+            <span style={{ fontSize: 9, color: running ? C.safe : C.danger, letterSpacing: 2 }}>
+              {running ? "LIVE" : "PAUSED"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+
+        {/* Top stat cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+          {[
+            { label: "PACKETS ANALYZED", val: stats.total.toLocaleString(), color: C.accent, spark: throughput, sparkColor: C.accent },
+            { label: "ANOMALIES DETECTED", val: stats.anomalies.toLocaleString(), color: C.warn, spark: anomalyRate.map(v => v * 100), sparkColor: C.warn },
+            { label: "CRITICAL THREATS", val: stats.critical.toLocaleString(), color: C.danger, spark: null, sparkColor: C.danger },
+            { label: "CONNECTIONS BLOCKED", val: stats.blocked.toLocaleString(), color: "#ff6b35", spark: null, sparkColor: "#ff6b35" },
+          ].map(({ label, val, color, spark, sparkColor }) => (
+            <div key={label} style={{
+              background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4,
+              padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8,
+              position: "relative", overflow: "hidden",
+            }}>
+              <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2 }}>{label}</div>
+              <div style={{ fontSize: 24, fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, color }}>{val}</div>
+              {spark && <Spark data={spark} color={sparkColor} />}
+              <div style={{
+                position: "absolute", top: 0, right: 0, width: 3, height: "100%",
+                background: color, opacity: 0.4,
+              }} />
+            </div>
+          ))}
+        </div>
+
+        {/* Middle row: gauges + heatmap + live alerts */}
+        <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 320px", gap: 12 }}>
+
+          {/* Gauges */}
+          <div style={{
+            background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4,
+            padding: 16, display: "flex", flexDirection: "column", gap: 16,
+          }}>
+            <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, marginBottom: 4 }}>SYSTEM METRICS</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center" }}>
+              <Gauge value={globalScore} max={0.3} label="ANOMALY RATE" color={C.accent} />
+              <Gauge value={Math.min(stats.total / 10000, 1)} label="PKT VOLUME" color={C.accent} />
+              <Gauge value={stats.critical / Math.max(stats.anomalies, 1)} label="CRIT RATIO" color={C.danger} />
+              <Gauge value={0.72} label="CPU LOAD" color={C.warn} />
+            </div>
+          </div>
+
+          {/* Heatmap */}
+          <div style={{
+            background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4, padding: 16,
+          }}>
+            <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, marginBottom: 12 }}>
+              THREAT HEATMAP — PROTOCOL × TIME SLOT
+            </div>
+            <HeatMap alerts={alerts} />
+            <div style={{ marginTop: 12, display: "flex", gap: 16 }}>
+              {[["LOW", C.accent], ["MED", C.warn], ["HIGH", "#ff6b35"], ["CRIT", C.danger]].map(([l, c]) => (
+                <div key={l} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <div style={{ width: 10, height: 10, background: c, borderRadius: 1 }} />
+                  <span style={{ fontSize: 9, color: C.dim }}>{l}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Live alert feed */}
+          <div style={{
+            background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4, padding: 16,
+            display: "flex", flexDirection: "column", gap: 8,
+          }}>
+            <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, display: "flex", alignItems: "center", gap: 6 }}>
+              <span className="blink" style={{ color: C.danger }}>●</span> ALERT FEED
+            </div>
+            <div style={{ overflowY: "auto", maxHeight: 180, display: "flex", flexDirection: "column", gap: 4 }}>
+              {alerts.slice(0, 20).map(a => (
+                <div key={a.id} onClick={() => setSelectedPkt(a)} style={{
+                  padding: "6px 8px", borderRadius: 2, cursor: "pointer",
+                  background: a.severity === "critical" ? "rgba(255,0,110,0.08)" : "rgba(255,190,11,0.05)",
+                  border: `1px solid ${a.severity === "critical" ? "rgba(255,0,110,0.2)" : "rgba(255,190,11,0.15)"}`,
+                  fontSize: 9,
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                    <span style={{ color: a.severity === "critical" ? C.danger : C.warn, fontWeight: 700 }}>
+                      {a.attackType}
+                    </span>
+                    <Badge sev={a.severity} />
+                  </div>
+                  <div style={{ color: C.dim }}>{a.src} → {a.dst}</div>
+                  <div style={{ color: C.dim, marginTop: 2 }}>score: {a.score} · {a.proto} · {a.geo}</div>
+                </div>
+              ))}
+              {alerts.length === 0 && <div style={{ color: C.dim, fontSize: 10, textAlign: "center", marginTop: 20 }}>No alerts yet</div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Packet table + inspector */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 12 }}>
+
+          {/* Table */}
+          <div style={{
+            background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden",
+          }}>
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "10px 16px", borderBottom: `1px solid ${C.border}`,
+            }}>
+              <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2 }}>PACKET STREAM</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {["all", "anomaly"].map(f => (
+                  <button key={f} onClick={() => setFilter(f)} style={{
+                    padding: "3px 10px", fontSize: 9, letterSpacing: 1,
+                    border: `1px solid ${filter === f ? C.accent : C.border}`,
+                    background: filter === f ? "rgba(0,245,212,0.1)" : "transparent",
+                    color: filter === f ? C.accent : C.dim,
+                    borderRadius: 2, cursor: "pointer", fontFamily: "'Space Mono', monospace",
+                    textTransform: "uppercase",
+                  }}>{f}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+                <thead>
+                  <tr style={{ background: "rgba(15,30,58,0.6)" }}>
+                    {["#", "SRC", "DST", "PROTO", "BYTES", "SCORE", "GEO", "ATTACK", "SEV"].map(h => (
+                      <th key={h} style={{
+                        padding: "6px 10px", textAlign: "left",
+                        color: C.dim, letterSpacing: 1, fontWeight: 400, fontSize: 9,
+                        borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap",
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody ref={tbodyRef}>
+                  {displayed.slice(0, 60).map(p => (
+                    <tr key={p.id}
+                      className={p.anomaly ? "row-anomaly" : ""}
+                      onClick={() => setSelectedPkt(p)}
+                      style={{
+                        cursor: "pointer",
+                        borderBottom: `1px solid rgba(15,30,58,0.5)`,
+                        background: selectedPkt?.id === p.id ? "rgba(0,245,212,0.07)" : "transparent",
+                        transition: "background 0.2s",
+                      }}>
+                      <td style={{ padding: "5px 10px", color: C.dim }}>{p.id}</td>
+                      <td style={{ padding: "5px 10px", color: p.anomaly ? C.warn : C.text, fontFamily: "'Space Mono', monospace" }}>{p.src}</td>
+                      <td style={{ padding: "5px 10px", color: C.text }}>{p.dst}</td>
+                      <td style={{ padding: "5px 10px", color: C.accent }}>{p.proto}</td>
+                      <td style={{ padding: "5px 10px", color: C.dim }}>{p.bytes.toLocaleString()}</td>
+                      <td style={{ padding: "5px 10px" }}><ScoreBar score={p.score} /></td>
+                      <td style={{ padding: "5px 10px", color: C.dim }}>{p.geo}</td>
+                      <td style={{ padding: "5px 10px", color: p.anomaly ? C.danger : C.dim }}>
+                        {p.attackType || "—"}
+                      </td>
+                      <td style={{ padding: "5px 10px" }}><Badge sev={p.severity} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Inspector */}
+          <div style={{
+            background: C.panel, border: `1px solid ${selectedPkt?.anomaly ? C.danger : C.border}`,
+            borderRadius: 4, padding: 16, transition: "border-color 0.3s",
+          }}>
+            <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, marginBottom: 12 }}>PACKET INSPECTOR</div>
+            {selectedPkt ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 14, color: selectedPkt.anomaly ? C.danger : C.safe, fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: 2 }}>
+                    {selectedPkt.anomaly ? `⚠ ${selectedPkt.attackType}` : "✓ CLEAN"}
+                  </span>
+                  <Badge sev={selectedPkt.severity} />
+                </div>
+
+                {[
+                  ["Packet ID", `#${selectedPkt.id}`],
+                  ["Source IP", selectedPkt.src],
+                  ["Destination IP", selectedPkt.dst],
+                  ["Src Port", selectedPkt.srcPort],
+                  ["Dst Port", selectedPkt.dstPort],
+                  ["Protocol", selectedPkt.proto],
+                  ["Payload Size", `${selectedPkt.bytes.toLocaleString()} B`],
+                  ["GeoIP", selectedPkt.geo],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}>
+                    <span style={{ color: C.dim }}>{k}</span>
+                    <span style={{ color: C.text }}>{v}</span>
+                  </div>
+                ))}
+
+                <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, marginTop: 4 }}>
+                  <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, marginBottom: 8 }}>ML FEATURES</div>
+                  {[
+                    ["Anomaly Score", selectedPkt.score, selectedPkt.score, 1],
+                    ["Packet Rate", selectedPkt.features.pktRate, selectedPkt.features.pktRate, 1000],
+                    ["Byte Entropy", selectedPkt.features.byteEntropy, selectedPkt.features.byteEntropy, 8],
+                    ["TTL Variance", selectedPkt.features.ttlVar, selectedPkt.features.ttlVar, 60],
+                  ].map(([label, display, val, max]) => (
+                    <div key={label} style={{ marginBottom: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, marginBottom: 3 }}>
+                        <span style={{ color: C.dim }}>{label}</span>
+                        <span style={{ color: C.text }}>{display}</span>
+                      </div>
+                      <div style={{ height: 3, background: C.border, borderRadius: 2 }}>
+                        <div style={{
+                          width: `${Math.min(val / max, 1) * 100}%`, height: "100%",
+                          background: val / max > 0.8 ? C.danger : val / max > 0.5 ? C.warn : C.accent,
+                          borderRadius: 2, transition: "width 0.3s",
+                        }} />
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginTop: 6 }}>
+                    <span style={{ color: C.dim }}>Flag Anomaly</span>
+                    <span style={{ color: selectedPkt.features.flagAnomaly ? C.danger : C.safe }}>
+                      {selectedPkt.features.flagAnomaly ? "YES" : "NO"}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{
+                  marginTop: 4, padding: "8px 10px", borderRadius: 2,
+                  background: selectedPkt.anomaly ? "rgba(255,0,110,0.08)" : "rgba(6,214,160,0.08)",
+                  border: `1px solid ${selectedPkt.anomaly ? "rgba(255,0,110,0.2)" : "rgba(6,214,160,0.2)"}`,
+                  fontSize: 9, color: selectedPkt.anomaly ? C.danger : C.safe, lineHeight: 1.6,
+                }}>
+                  {selectedPkt.anomaly
+                    ? `THREAT CONFIRMED — Score ${selectedPkt.score} exceeds threshold ${modelInfo.threshold}. Pattern matches ${selectedPkt.attackType} signature. Recommend immediate block.`
+                    : `BENIGN TRAFFIC — Score ${selectedPkt.score} below threshold ${modelInfo.threshold}. No known attack signatures detected.`}
+                </div>
+              </div>
+            ) : (
+              <div style={{ color: C.dim, fontSize: 10, textAlign: "center", marginTop: 40 }}>
+                Click any packet to inspect
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
