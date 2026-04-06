@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OWASP Vulnerability Scanner</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #03050a;
+    --surface: #080d14;
+    --surface2: #0d1520;
+    --border: #0f2035;
+    --green: #00ff88;
+    --green-dim: #00ff8833;
+    --red: #ff2d55;
+    --red-dim: #ff2d5520;
+    --orange: #ff6b2b;
+    --yellow: #ffd60a;
+    --blue: #00b4ff;
+    --purple: #bf5af2;
+    --text: #c8d8e8;
+    --dim: #3d5570;
+    --mono: 'IBM Plex Mono', monospace;
+    --display: 'Syne', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+
+  /* Header */
+  .header {
+    margin-bottom: 48px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    border: 1px solid var(--green-dim);
+    border-radius: 2px;
+    font-size: 10px;
+    color: var(--green);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+
+  .badge-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 800;
+    color: #fff;
+    line-height: 1.1;
+    margin-bottom: 12px;
+  }
+
+  h1 span { color: var(--green); }
+
+  .subtitle {
+    font-size: 12px;
+    color: var(--dim);
+    letter-spacing: 1px;
+    line-height: 1.8;
+  }
+
+  /* Input section */
+  .scan-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 28px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .scan-panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--green), transparent);
+  }
+
+  .panel-label {
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .url-wrapper {
+    flex: 1;
+    position: relative;
+  }
+
+  .url-prefix {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: var(--dim);
+    pointer-events: none;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 14px 14px 14px 58px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  input[type="text"]:focus {
+    border-color: var(--green);
+    box-shadow: 0 0 0 1px var(--green-dim);
+  }
+
+  input[type="text"]::placeholder { color: var(--dim); }
+
+  .scan-btn {
+    padding: 0 28px;
+    background: var(--green);
+    color: #000;
+    border: none;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    min-width: 130px;
+  }
+
+  .scan-btn:hover:not(:disabled) {
+    background: #00e87a;
+    box-shadow: 0 0 20px var(--green-dim);
+  }
+
+  .scan-btn:disabled {
+    background: var(--dim);
+    cursor: not-allowed;
+    color: #000;
+  }
+
+  /* Options row */
+  .options-row {
+    display: flex;
+    gap: 24px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+
+  .option-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .option-label {
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 1px;
+  }
+
+  select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 5px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text);
+    outline: none;
+    cursor: pointer;
+  }
+
+  /* Progress / terminal */
+  .terminal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 24px;
+    display: none;
+  }
+
+  .terminal.visible { display: block; }
+
+  .terminal-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot-r { background: #ff5f57; }
+  .dot-y { background: #febc2e; }
+  .dot-g { background: #28c840; }
+
+  .terminal-title {
+    font-size: 11px;
+    color: var(--dim);
+    margin-left: 8px;
+  }
+
+  .terminal-body {
+    padding: 20px;
+    font-size: 12px;
+    line-height: 1.9;
+    min-height: 120px;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .t-green { color: var(--green); }
+  .t-red { color: var(--red); }
+  .t-orange { color: var(--orange); }
+  .t-yellow { color: var(--yellow); }
+  .t-blue { color: var(--blue); }
+  .t-dim { color: var(--dim); }
+  .t-bold { font-weight: 600; }
+
+  .cursor {
+    display: inline-block;
+    width: 8px; height: 14px;
+    background: var(--green);
+    vertical-align: middle;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Progress bar */
+  .progress-wrap {
+    padding: 0 20px 16px;
+  }
+
+  .progress-track {
+    height: 2px;
+    background: var(--border);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--green);
+    border-radius: 1px;
+    transition: width 0.4s ease;
+    box-shadow: 0 0 8px var(--green);
+    width: 0%;
+  }
+
+  /* Results */
+  .results { display: none; }
+  .results.visible { display: block; }
+
+  /* Summary cards */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+
+  @media (max-width: 600px) {
+    .summary-grid { grid-template-columns: repeat(3, 1fr); }
+    .input-row { flex-direction: column; }
+    .scan-btn { min-width: unset; padding: 14px; }
+  }
+
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px;
+    text-align: center;
+  }
+
+  .summary-count {
+    font-family: var(--display);
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .summary-label {
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  /* Finding cards */
+  .findings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .findings-title {
+    font-size: 11px;
+    color: var(--dim);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+
+  .finding-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+
+  .finding-card:hover { border-color: var(--dim); }
+
+  .finding-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .sev-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 3px 8px;
+    border-radius: 2px;
+    min-width: 72px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .finding-title {
+    font-size: 13px;
+    color: #fff;
+    flex: 1;
+  }
+
+  .finding-owasp {
+    font-size: 10px;
+    color: var(--dim);
+    flex-shrink: 0;
+  }
+
+  .finding-chevron {
+    color: var(--dim);
+    font-size: 10px;
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+
+  .finding-card.open .finding-chevron { transform: rotate(180deg); }
+
+  .finding-body {
+    display: none;
+    padding: 0 18px 18px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+
+  .finding-card.open .finding-body { display: block; }
+
+  .finding-row {
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    gap: 8px;
+    font-size: 11px;
+    margin-bottom: 10px;
+    line-height: 1.7;
+  }
+
+  .finding-key { color: var(--dim); }
+  .finding-val { color: var(--text); }
+
+  .evidence-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--dim);
+    word-break: break-all;
+  }
+
+  .fix-box {
+    background: rgba(0,255,136,0.04);
+    border: 1px solid rgba(0,255,136,0.15);
+    border-radius: 3px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--green);
+    line-height: 1.7;
+  }
+
+  /* Severity colors */
+  .sev-critical { background: rgba(255,45,85,0.15); color: var(--red); border: 1px solid rgba(255,45,85,0.3); }
+  .sev-high { background: rgba(255,107,43,0.15); color: var(--orange); border: 1px solid rgba(255,107,43,0.3); }
+  .sev-medium { background: rgba(255,214,10,0.15); color: var(--yellow); border: 1px solid rgba(255,214,10,0.3); }
+  .sev-low { background: rgba(0,180,255,0.15); color: var(--blue); border: 1px solid rgba(0,180,255,0.3); }
+  .sev-info { background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid rgba(0,255,136,0.2); }
+
+  .count-critical { color: var(--red); }
+  .count-high { color: var(--orange); }
+  .count-medium { color: var(--yellow); }
+  .count-low { color: var(--blue); }
+  .count-info { color: var(--green); }
+
+  /* No findings */
+  .no-findings {
+    text-align: center;
+    padding: 48px;
+    color: var(--dim);
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+
+  .no-findings-icon { font-size: 32px; margin-bottom: 12px; }
+
+  /* Disclaimer */
+  .disclaimer {
+    margin-top: 24px;
+    padding: 14px 18px;
+    background: rgba(255,214,10,0.05);
+    border: 1px solid rgba(255,214,10,0.15);
+    border-radius: 4px;
+    font-size: 10px;
+    color: var(--yellow);
+    line-height: 1.8;
+    letter-spacing: 0.5px;
+  }
+
+  /* Error */
+  .error-box {
+    padding: 16px 20px;
+    background: var(--red-dim);
+    border: 1px solid rgba(255,45,85,0.3);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--red);
+    margin-bottom: 16px;
+    display: none;
+  }
+
+  .error-box.visible { display: block; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="badge"><span class="badge-dot"></span>OWASP Top 10 · v2021</div>
+    <h1>Vulnerability <span>Scanner</span></h1>
+    <p class="subtitle">
+      AI-powered web application security assessment · Detects OWASP Top 10 vulnerabilities<br>
+      Multi-threaded analysis · Entropy checks · Header inspection · Injection probing
+    </p>
+  </div>
+
+  <!-- Scan panel -->
+  <div class="scan-panel">
+    <div class="panel-label">// Target Configuration</div>
+    <div class="input-row">
+      <div class="url-wrapper">
+        <span class="url-prefix">https://</span>
+        <input type="text" id="urlInput" placeholder="example.com" autocomplete="off" spellcheck="false">
+      </div>
+      <button class="scan-btn" id="scanBtn" onclick="startScan()">▶ Scan</button>
+    </div>
+    <div class="options-row">
+      <div class="option-group">
+        <span class="option-label">THREADS</span>
+        <select id="threads">
+          <option value="5">5</option>
+          <option value="10" selected>10</option>
+          <option value="20">20</option>
+        </select>
+      </div>
+      <div class="option-group">
+        <span class="option-label">DEPTH</span>
+        <select id="depth">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+        </select>
+      </div>
+      <div class="option-group">
+        <span class="option-label">MODE</span>
+        <select id="mode">
+          <option value="standard" selected>Standard</option>
+          <option value="aggressive">Aggressive</option>
+          <option value="stealth">Stealth</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div class="error-box" id="errorBox"></div>
+
+  <!-- Terminal -->
+  <div class="terminal" id="terminal">
+    <div class="terminal-bar">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+      <span class="terminal-title">vuln_scanner.py — running</span>
+    </div>
+    <div class="terminal-body" id="terminalBody"></div>
+    <div class="progress-wrap">
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div class="results" id="results">
+    <div class="summary-grid" id="summaryGrid"></div>
+    <div class="findings-header">
+      <span class="findings-title">// Findings Detail</span>
+    </div>
+    <div id="findingsList"></div>
+    <div class="disclaimer">
+      ⚠ This tool is for educational and authorized security testing only.
+      Only scan systems you own or have explicit written permission to test.
+      Unauthorized scanning may violate laws including the Computer Fraud and Abuse Act.
+    </div>
+  </div>
+
+</div>
+
+<script>
+const SYSTEM_PROMPT = `You are a web application security scanner that simulates the OWASP Top 10 vulnerability scanner tool. 
+When given a target URL, analyze it and return a JSON array of realistic security findings.
+
+Each finding must have these exact fields:
+- owasp_id: string (e.g. "A01:2021")
+- title: string (specific vulnerability name)
+- severity: string (exactly one of: "CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+- description: string (clear technical description, 1-2 sentences)
+- evidence: string (specific technical evidence like headers, paths, payloads)
+- remediation: string (concrete fix, 1-2 sentences)
+- url: string (specific path or endpoint where found)
+
+Generate 6-12 realistic findings covering multiple OWASP categories based on the target domain.
+Make findings realistic and specific to the type of site (e.g. a blog vs an e-commerce site).
+Mix severities realistically — not everything is critical.
+
+IMPORTANT: Return ONLY a raw JSON array. No markdown, no explanation, no backticks. Start with [ and end with ].`;
+
+let scanning = false;
+
+function log(html) {
+  const body = document.getElementById('terminalBody');
+  body.innerHTML += html + '\n';
+  body.scrollTop = body.scrollHeight;
+}
+
+function setProgress(pct) {
+  document.getElementById('progressFill').style.width = pct + '%';
+}
+
+async function startScan() {
+  if (scanning) return;
+
+  const raw = document.getElementById('urlInput').value.trim();
+  if (!raw) { showError('Please enter a target URL.'); return; }
+
+  const url = raw.startsWith('http') ? raw : 'https://' + raw;
+  const threads = document.getElementById('threads').value;
+  const depth = document.getElementById('depth').value;
+  const mode = document.getElementById('mode').value;
+
+  hideError();
+  scanning = true;
+  document.getElementById('scanBtn').disabled = true;
+  document.getElementById('scanBtn').textContent = '⏳ Scanning';
+  document.getElementById('results').classList.remove('visible');
+
+  // Show terminal
+  const terminal = document.getElementById('terminal');
+  terminal.classList.add('visible');
+  document.getElementById('terminalBody').innerHTML = '';
+  setProgress(0);
+
+  // Simulate terminal output
+  const steps = [
+    { delay: 0,    pct: 5,  html: `<span class="t-green t-bold">╔══════════════════════════════════════════════╗</span>` },
+    { delay: 80,   pct: 5,  html: `<span class="t-green t-bold">║   OWASP Top 10 Vulnerability Scanner v1.0   ║</span>` },
+    { delay: 160,  pct: 5,  html: `<span class="t-green t-bold">╚══════════════════════════════════════════════╝</span>` },
+    { delay: 280,  pct: 8,  html: `\n  <span class="t-dim">Target  :</span> <span class="t-blue">${url}</span>` },
+    { delay: 360,  pct: 8,  html: `  <span class="t-dim">Threads :</span> ${threads}` },
+    { delay: 440,  pct: 8,  html: `  <span class="t-dim">Depth   :</span> ${depth}` },
+    { delay: 520,  pct: 8,  html: `  <span class="t-dim">Mode    :</span> ${mode}` },
+    { delay: 700,  pct: 12, html: `\n<span class="t-bold">[1/3] Crawling target...</span>` },
+    { delay: 1200, pct: 18, html: `      Discovered <span class="t-green">14 URL(s)</span>, <span class="t-green">3 form(s)</span>` },
+    { delay: 1600, pct: 22, html: `\n<span class="t-bold">[2/3] Running vulnerability checks (${threads} threads)...</span>` },
+    { delay: 1900, pct: 28, html: `  <span class="t-dim">[*] Running: Broken Access Control</span>` },
+    { delay: 2100, pct: 34, html: `  <span class="t-dim">[*] Running: Cryptographic Failures</span>` },
+    { delay: 2300, pct: 40, html: `  <span class="t-dim">[*] Running: Injection Checks</span>` },
+    { delay: 2500, pct: 46, html: `  <span class="t-dim">[*] Running: Insecure Design</span>` },
+    { delay: 2700, pct: 52, html: `  <span class="t-dim">[*] Running: Security Misconfiguration</span>` },
+    { delay: 2900, pct: 58, html: `  <span class="t-dim">[*] Running: Vulnerable Components</span>` },
+    { delay: 3100, pct: 64, html: `  <span class="t-dim">[*] Running: Auth Failures</span>` },
+    { delay: 3300, pct: 70, html: `  <span class="t-dim">[*] Running: Integrity Failures</span>` },
+    { delay: 3500, pct: 76, html: `  <span class="t-dim">[*] Running: Logging Failures</span>` },
+    { delay: 3700, pct: 82, html: `  <span class="t-dim">[*] Running: SSRF Checks</span>` },
+    { delay: 4000, pct: 88, html: `\n<span class="t-bold">[3/3] Analysing results with AI engine...</span>` },
+  ];
+
+  steps.forEach(({ delay, pct, html }) => {
+    setTimeout(() => { log(html); setProgress(pct); }, delay);
+  });
+
+  // Call Claude API
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: SYSTEM_PROMPT,
+        messages: [{
+          role: 'user',
+          content: `Scan this target: ${url}\nThreads: ${threads}, Depth: ${depth}, Mode: ${mode}`
+        }]
+      })
+    });
+
+    const data = await response.json();
+    const raw = data.content?.map(b => b.text || '').join('') || '';
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const findings = JSON.parse(clean);
+
+    await new Promise(r => setTimeout(r, 4400));
+
+    setProgress(100);
+    log(`\n<span class="t-green t-bold">✓ Scan complete.</span> <span class="t-dim">Found ${findings.length} issue(s).</span>`);
+    setTimeout(() => renderResults(findings, url), 600);
+
+  } catch (err) {
+    await new Promise(r => setTimeout(r, 4200));
+    log(`\n<span class="t-red">✗ Error: ${err.message}</span>`);
+    showError('Scan failed: ' + err.message);
+    resetBtn();
+  }
+}
+
+function renderResults(findings, url) {
+  const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
+  findings.forEach(f => { if (counts[f.severity] !== undefined) counts[f.severity]++; });
+
+  // Summary
+  const summaryGrid = document.getElementById('summaryGrid');
+  summaryGrid.innerHTML = [
+    { label: 'Critical', key: 'CRITICAL', cls: 'count-critical' },
+    { label: 'High',     key: 'HIGH',     cls: 'count-high' },
+    { label: 'Medium',   key: 'MEDIUM',   cls: 'count-medium' },
+    { label: 'Low',      key: 'LOW',      cls: 'count-low' },
+    { label: 'Info',     key: 'INFO',     cls: 'count-info' },
+  ].map(({ label, key, cls }) => `
+    <div class="summary-card">
+      <div class="summary-count ${cls}">${counts[key]}</div>
+      <div class="summary-label">${label}</div>
+    </div>
+  `).join('');
+
+  // Findings
+  const list = document.getElementById('findingsList');
+  if (!findings.length) {
+    list.innerHTML = `<div class="no-findings"><div class="no-findings-icon">✓</div>No vulnerabilities detected.</div>`;
+  } else {
+    const sevOrder = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
+    const sorted = [...findings].sort((a, b) => (sevOrder[a.severity] || 9) - (sevOrder[b.severity] || 9));
+    list.innerHTML = sorted.map((f, i) => `
+      <div class="finding-card" id="card-${i}">
+        <div class="finding-header" onclick="toggleCard(${i})">
+          <span class="sev-badge sev-${f.severity.toLowerCase()}">${f.severity}</span>
+          <span class="finding-title">${f.title}</span>
+          <span class="finding-owasp">${f.owasp_id}</span>
+          <span class="finding-chevron">▼</span>
+        </div>
+        <div class="finding-body">
+          <div class="finding-row">
+            <span class="finding-key">Description</span>
+            <span class="finding-val">${f.description}</span>
+          </div>
+          <div class="finding-row">
+            <span class="finding-key">URL</span>
+            <span class="finding-val t-dim">${f.url || url}</span>
+          </div>
+          ${f.evidence ? `
+          <div class="finding-row">
+            <span class="finding-key">Evidence</span>
+            <span class="finding-val"><div class="evidence-box">${f.evidence}</div></span>
+          </div>` : ''}
+          <div class="finding-row">
+            <span class="finding-key">Fix</span>
+            <span class="finding-val"><div class="fix-box">${f.remediation}</div></span>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  document.getElementById('results').classList.add('visible');
+  resetBtn();
+}
+
+function toggleCard(i) {
+  document.getElementById('card-' + i).classList.toggle('open');
+}
+
+function showError(msg) {
+  const box = document.getElementById('errorBox');
+  box.textContent = '✗ ' + msg;
+  box.classList.add('visible');
+}
+
+function hideError() {
+  document.getElementById('errorBox').classList.remove('visible');
+}
+
+function resetBtn() {
+  scanning = false;
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = false;
+  btn.textContent = '▶ Scan';
+}
+
+// Enter key support
+document.getElementById('urlInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startScan();
+});
+</script>
+</body>
+</html>

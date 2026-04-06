@@ -1,0 +1,207 @@
+#include <Wire.h>
+
+int buzzerPin = 8;
+const int LSM6DS3_ADDRESS = 0x6B;
+
+// Register addresses for LSM6DS3
+#define LSM6DS3_WHO_AM_I   0x0F
+#define LSM6DS3_CTRL1_XL   0x10
+#define LSM6DS3_CTRL2_G    0x11
+#define LSM6DS3_OUTX_L_XL  0x28
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  
+  pinMode(buzzerPin, OUTPUT);
+  
+  delay(100);
+  
+  // Check WHO_AM_I register
+  Wire.beginTransmission(LSM6DS3_ADDRESS);
+  Wire.write(LSM6DS3_WHO_AM_I);
+  Wire.endTransmission();
+  
+  Wire.requestFrom(LSM6DS3_ADDRESS, 1);
+  if (Wire.available()) {
+    byte whoAmI = Wire.read();
+    Serial.print("WHO_AM_I register value: 0x");
+    Serial.println(whoAmI, HEX);
+    
+    // LSM6DS3 should return 0x69 or 0x6A
+    if (whoAmI == 0x69 || whoAmI == 0x6A) {
+      Serial.println("LSM6DS3 detected!");
+      
+      // Configure accelerometer
+      writeRegister(LSM6DS3_ADDRESS, LSM6DS3_CTRL1_XL, 0x60); // 416 Hz, 4g range
+      writeRegister(LSM6DS3_ADDRESS, LSM6DS3_CTRL2_G, 0x00);  // Disable gyro
+      
+      Serial.println("Sensor configured successfully!");
+      Serial.println("Tilt detector ready!");
+    } else {
+      Serial.print("Unknown sensor ID: 0x");
+      Serial.println(whoAmI, HEX);
+    }
+  } else {
+    Serial.println("No response from sensor!");
+    while(1);
+  }
+}
+
+void writeRegister(uint8_t address, uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(address);
+  Wire.write(reg);
+  Wire.write(value);
+  Wire.endTransmission();
+}
+
+int16_t readRegister16(uint8_t address, uint8_t reg) {
+  Wire.beginTransmission(address);
+  Wire.write(reg);
+  Wire.endTransmission();
+  
+  Wire.requestFrom(address, 2);
+  while (Wire.available() < 2);
+  
+  int16_t value = Wire.read();
+  value |= (Wire.read() << 8);
+  return value;
+}
+
+void loop() {
+  // Read accelerometer data
+  int16_t ax = readRegister16(LSM6DS3_ADDRESS, LSM6DS3_OUTX_L_XL);
+  int16_t ay = readRegister16(LSM6DS3_ADDRESS, LSM6DS3_OUTX_L_XL + 2);
+  int16_t az = readRegister16(LSM6DS3_ADDRESS, LSM6DS3_OUTX_L_XL + 4);
+  
+  // Convert to g (4g range = 8192 LSB/g)
+  float x = ax / 8192.0;
+  float y = ay / 8192.0;
+  float z = az / 8192.0;
+  
+  // Calculate tilt angle
+  float magnitude = sqrt(x*x + y*y + z*z);
+  float tiltAngle = acos(abs(z) / magnitude) * (180.0 / PI);
+  
+  Serial.print("Tilt: ");
+  Serial.print(tiltAngle);
+  Serial.print("° | X:");
+  Serial.print(x, 2);
+  Serial.print(" Y:");
+  Serial.print(y, 2);
+  Serial.print(" Z:");
+  Serial.println(z, 2);
+  
+  if (tiltAngle > 30.0) {
+    digitalWrite(buzzerPin, HIGH);
+    Serial.println("TILT ALERT!");
+    delay(500);
+    digitalWrite(buzzerPin, LOW);
+    delay(1500); // Debounce
+  }
+  
+  delay(100);
+}#include <Wire.h>
+
+int buzzerPin = 8;
+const int LSM6DS3_ADDRESS = 0x6B;
+
+// Register addresses for LSM6DS3
+#define LSM6DS3_WHO_AM_I   0x0F
+#define LSM6DS3_CTRL1_XL   0x10
+#define LSM6DS3_CTRL2_G    0x11
+#define LSM6DS3_OUTX_L_XL  0x28
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  
+  pinMode(buzzerPin, OUTPUT);
+  
+  delay(100);
+  
+  // Check WHO_AM_I register
+  Wire.beginTransmission(LSM6DS3_ADDRESS);
+  Wire.write(LSM6DS3_WHO_AM_I);
+  Wire.endTransmission();
+  
+  Wire.requestFrom(LSM6DS3_ADDRESS, 1);
+  if (Wire.available()) {
+    byte whoAmI = Wire.read();
+    Serial.print("WHO_AM_I register value: 0x");
+    Serial.println(whoAmI, HEX);
+    
+    // LSM6DS3 should return 0x69 or 0x6A
+    if (whoAmI == 0x69 || whoAmI == 0x6A) {
+      Serial.println("LSM6DS3 detected!");
+      
+      // Configure accelerometer
+      writeRegister(LSM6DS3_ADDRESS, LSM6DS3_CTRL1_XL, 0x60); // 416 Hz, 4g range
+      writeRegister(LSM6DS3_ADDRESS, LSM6DS3_CTRL2_G, 0x00);  // Disable gyro
+      
+      Serial.println("Sensor configured successfully!");
+      Serial.println("Tilt detector ready!");
+    } else {
+      Serial.print("Unknown sensor ID: 0x");
+      Serial.println(whoAmI, HEX);
+    }
+  } else {
+    Serial.println("No response from sensor!");
+    while(1);
+  }
+}
+
+void writeRegister(uint8_t address, uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(address);
+  Wire.write(reg);
+  Wire.write(value);
+  Wire.endTransmission();
+}
+
+int16_t readRegister16(uint8_t address, uint8_t reg) {
+  Wire.beginTransmission(address);
+  Wire.write(reg);
+  Wire.endTransmission();
+  
+  Wire.requestFrom(address, 2);
+  while (Wire.available() < 2);
+  
+  int16_t value = Wire.read();
+  value |= (Wire.read() << 8);
+  return value;
+}
+
+void loop() {
+  // Read accelerometer data
+  int16_t ax = readRegister16(LSM6DS3_ADDRESS, LSM6DS3_OUTX_L_XL);
+  int16_t ay = readRegister16(LSM6DS3_ADDRESS, LSM6DS3_OUTX_L_XL + 2);
+  int16_t az = readRegister16(LSM6DS3_ADDRESS, LSM6DS3_OUTX_L_XL + 4);
+  
+  // Convert to g (4g range = 8192 LSB/g)
+  float x = ax / 8192.0;
+  float y = ay / 8192.0;
+  float z = az / 8192.0;
+  
+  // Calculate tilt angle
+  float magnitude = sqrt(x*x + y*y + z*z);
+  float tiltAngle = acos(abs(z) / magnitude) * (180.0 / PI);
+  
+  Serial.print("Tilt: ");
+  Serial.print(tiltAngle);
+  Serial.print("° | X:");
+  Serial.print(x, 2);
+  Serial.print(" Y:");
+  Serial.print(y, 2);
+  Serial.print(" Z:");
+  Serial.println(z, 2);
+  
+  if (tiltAngle > 30.0) {
+    digitalWrite(buzzerPin, HIGH);
+    Serial.println("TILT ALERT!");
+    delay(500);
+    digitalWrite(buzzerPin, LOW);
+    delay(1500); // Debounce
+  }
+  
+  delay(100);
+}

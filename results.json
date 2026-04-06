@@ -1,0 +1,67 @@
+{
+  "target": "https://target.com",
+  "scan_time": "2026-04-06T00:34:54.074469",
+  "total": 6,
+  "findings": [
+    {
+      "owasp_id": "A05:2021",
+      "title": "Missing Header: Content-Security-Policy",
+      "severity": "HIGH",
+      "description": "CSP header absent",
+      "evidence": "Header 'Content-Security-Policy' not present in response",
+      "remediation": "Add the 'Content-Security-Policy' response header with a secure value.",
+      "url": "https://target.com",
+      "timestamp": "2026-04-06T00:34:34.920945"
+    },
+    {
+      "owasp_id": "A05:2021",
+      "title": "Missing Header: X-Frame-Options",
+      "severity": "MEDIUM",
+      "description": "Clickjacking protection missing",
+      "evidence": "Header 'X-Frame-Options' not present in response",
+      "remediation": "Add the 'X-Frame-Options' response header with a secure value.",
+      "url": "https://target.com",
+      "timestamp": "2026-04-06T00:34:34.920825"
+    },
+    {
+      "owasp_id": "A05:2021",
+      "title": "Missing Header: X-Content-Type-Options",
+      "severity": "LOW",
+      "description": "MIME-sniffing protection missing",
+      "evidence": "Header 'X-Content-Type-Options' not present in response",
+      "remediation": "Add the 'X-Content-Type-Options' response header with a secure value.",
+      "url": "https://target.com",
+      "timestamp": "2026-04-06T00:34:34.920906"
+    },
+    {
+      "owasp_id": "A05:2021",
+      "title": "Missing Header: X-XSS-Protection",
+      "severity": "LOW",
+      "description": "Legacy XSS protection missing",
+      "evidence": "Header 'X-XSS-Protection' not present in response",
+      "remediation": "Add the 'X-XSS-Protection' response header with a secure value.",
+      "url": "https://target.com",
+      "timestamp": "2026-04-06T00:34:34.920975"
+    },
+    {
+      "owasp_id": "A05:2021",
+      "title": "Missing Header: Referrer-Policy",
+      "severity": "LOW",
+      "description": "Referrer-Policy header absent",
+      "evidence": "Header 'Referrer-Policy' not present in response",
+      "remediation": "Add the 'Referrer-Policy' response header with a secure value.",
+      "url": "https://target.com",
+      "timestamp": "2026-04-06T00:34:34.921005"
+    },
+    {
+      "owasp_id": "A05:2021",
+      "title": "Missing Header: Permissions-Policy",
+      "severity": "LOW",
+      "description": "Permissions-Policy header absent",
+      "evidence": "Header 'Permissions-Policy' not present in response",
+      "remediation": "Add the 'Permissions-Policy' response header with a secure value.",
+      "url": "https://target.com",
+      "timestamp": "2026-04-06T00:34:34.921154"
+    }
+  ]
+}
